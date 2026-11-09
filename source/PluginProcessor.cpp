@@ -4,13 +4,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 #include <vector>
 
-//==============================================================================
 PluginProcessor::PluginProcessor()
     : AudioProcessor (BusesProperties()
-                      .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                          .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
 }
@@ -53,26 +53,35 @@ PluginProcessor::APVTS::ParameterLayout PluginProcessor::createParameterLayout()
     return { params.begin(), params.end() };
 }
 
-//==============================================================================
-const juce::String PluginProcessor::getName() const { return JucePlugin_Name; }
-bool PluginProcessor::acceptsMidi() const { return false; }
+const juce::String PluginProcessor::getName() const
+{
+    return JucePlugin_Name;
+}
+
+bool PluginProcessor::acceptsMidi() const  { return false; }
 bool PluginProcessor::producesMidi() const { return false; }
 bool PluginProcessor::isMidiEffect() const { return false; }
 double PluginProcessor::getTailLengthSeconds() const { return 0.0; }
+
 int PluginProcessor::getNumPrograms() { return 1; }
 int PluginProcessor::getCurrentProgram() { return 0; }
-void PluginProcessor::setCurrentProgram (int index) { juce::ignoreUnused (index); }
+
+void PluginProcessor::setCurrentProgram (int index)
+{
+    juce::ignoreUnused (index);
+}
+
 const juce::String PluginProcessor::getProgramName (int index)
 {
     juce::ignoreUnused (index);
     return "Default";
 }
+
 void PluginProcessor::changeProgramName (int index, const juce::String& newName)
 {
     juce::ignoreUnused (index, newName);
 }
 
-//==============================================================================
 void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused (samplesPerBlock);
@@ -80,8 +89,10 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate;
     envelopeDb = 0.0f;
 
-    hpfPreviousInputL = hpfPreviousInputR = 0.0f;
-    hpfPreviousOutputL = hpfPreviousOutputR = 0.0f;
+    hpfPreviousInputL = 0.0f;
+    hpfPreviousInputR = 0.0f;
+    hpfPreviousOutputL = 0.0f;
+    hpfPreviousOutputR = 0.0f;
 
     smoothedMakeupDb.reset (sampleRate, 0.02);
     smoothedMix.reset (sampleRate, 0.02);
@@ -105,7 +116,6 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
         && layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
-//==============================================================================
 void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                     juce::MidiBuffer& midiMessages)
 {
@@ -127,9 +137,13 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const bool isOn = apvts.getRawParameterValue ("in")->load() > 0.5f;
 
     constexpr std::array<float, 3> ratios { 2.0f, 4.0f, 10.0f };
-    constexpr std::array<float, 6> attacks { 0.0001f, 0.0003f, 0.001f, 0.003f, 0.010f, 0.030f };
+    constexpr std::array<float, 6> attacks {
+        0.0001f, 0.0003f, 0.001f, 0.003f, 0.010f, 0.030f
+    };
     constexpr std::array<float, 5> releases { 0.1f, 0.3f, 0.6f, 1.2f, 0.3f };
-    constexpr std::array<float, 6> hpfFrequencies { 0.0f, 60.0f, 90.0f, 120.0f, 150.0f, 200.0f };
+    constexpr std::array<float, 6> hpfFrequencies {
+        0.0f, 60.0f, 90.0f, 120.0f, 150.0f, 200.0f
+    };
 
     const float ratio = ratios[(size_t) ratioIndex];
     const float attackSeconds = attacks[(size_t) attackIndex];
@@ -158,9 +172,8 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const float dryL = left[i];
         const float dryR = right[i];
 
-        inputPeak = juce::jmax (inputPeak, std::abs (dryL), std::abs (dryR));
+        inputPeak = std::max ({ inputPeak, std::abs (dryL), std::abs (dryR) });
 
-        // High-pass filtering is used only by the compressor detector.
         float detectorL = dryL;
         float detectorR = dryR;
 
@@ -187,8 +200,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             hpfPreviousOutputR = dryR;
         }
 
-        // One shared detector keeps the stereo image centered.
-        const float linkedPeak = juce::jmax (std::abs (detectorL), std::abs (detectorR));
+        const float linkedPeak = std::max (std::abs (detectorL), std::abs (detectorR));
         const float detectorDb = juce::Decibels::gainToDecibels (linkedPeak, -100.0f);
         const float overThresholdDb = detectorDb - thresholdDb;
 
@@ -211,7 +223,6 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         float releaseSeconds = releases[(size_t) releaseIndex];
 
-        // Auto release adapts to the amount of gain reduction.
         if (releaseIndex == 4)
             releaseSeconds = juce::jlimit (0.10f, 1.10f, 0.10f + envelopeDb * 0.08f);
 
@@ -225,7 +236,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         envelopeDb = coefficient * envelopeDb
                    + (1.0f - coefficient) * targetReductionDb;
 
-        maxReductionThisBlock = juce::jmax (maxReductionThisBlock, envelopeDb);
+        maxReductionThisBlock = std::max (maxReductionThisBlock, envelopeDb);
 
         const float makeup = smoothedMakeupDb.getNextValue();
         const float mix = smoothedMix.getNextValue();
@@ -243,7 +254,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         left[i]  = dryL * (1.0f - active) + mixedL * active;
         right[i] = dryR * (1.0f - active) + mixedR * active;
 
-        outputPeak = juce::jmax (outputPeak, std::abs (left[i]), std::abs (right[i]));
+        outputPeak = std::max ({ outputPeak, std::abs (left[i]), std::abs (right[i]) });
     }
 
     gainReductionDb.store (isOn ? maxReductionThisBlock : 0.0f);
@@ -251,8 +262,10 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     outputLevelDb.store (juce::Decibels::gainToDecibels (outputPeak, -60.0f));
 }
 
-//==============================================================================
-bool PluginProcessor::hasEditor() const { return true; }
+bool PluginProcessor::hasEditor() const
+{
+    return true;
+}
 
 juce::AudioProcessorEditor* PluginProcessor::createEditor()
 {
@@ -276,7 +289,6 @@ void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
         apvts.replaceState (juce::ValueTree::fromXml (*xml));
 }
 
-//==============================================================================
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new PluginProcessor();
