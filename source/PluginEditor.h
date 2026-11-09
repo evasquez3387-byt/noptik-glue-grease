@@ -1,25 +1,52 @@
 #pragma once
 
 #include "PluginProcessor.h"
-#include "BinaryData.h"
-#include "melatonin_inspector/melatonin_inspector.h"
+#include <array>
 
-//==============================================================================
-class PluginEditor : public juce::AudioProcessorEditor
+class PluginEditor : public juce::AudioProcessorEditor,
+                     private juce::Timer
 {
 public:
     explicit PluginEditor (PluginProcessor&);
-    ~PluginEditor() override;
+    ~PluginEditor() override = default;
 
-    //==============================================================================
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
+    using SliderAttachment =
+        juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ComboBoxAttachment =
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using ButtonAttachment =
+        juce::AudioProcessorValueTreeState::ButtonAttachment;
+
+    void timerCallback() override;
+
     PluginProcessor& processorRef;
-    std::unique_ptr<melatonin::Inspector> inspector;
-    juce::TextButton inspectButton { "Inspect the UI" };
+
+    juce::Slider thresholdSlider;
+    juce::Slider makeupSlider;
+    juce::Slider mixSlider;
+
+    juce::ComboBox ratioBox;
+    juce::ComboBox attackBox;
+    juce::ComboBox releaseBox;
+    juce::ComboBox hpfBox;
+
+    juce::ToggleButton inButton { "COMP IN" };
+    std::array<juce::Label, 7> controlLabels;
+
+    std::unique_ptr<SliderAttachment> thresholdAttachment;
+    std::unique_ptr<SliderAttachment> makeupAttachment;
+    std::unique_ptr<SliderAttachment> mixAttachment;
+
+    std::unique_ptr<ComboBoxAttachment> ratioAttachment;
+    std::unique_ptr<ComboBoxAttachment> attackAttachment;
+    std::unique_ptr<ComboBoxAttachment> releaseAttachment;
+    std::unique_ptr<ComboBoxAttachment> hpfAttachment;
+
+    std::unique_ptr<ButtonAttachment> inAttachment;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };
